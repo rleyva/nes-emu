@@ -98,7 +98,7 @@ namespace address
     template <typename Operation>
     void zero_page(const Operation &op, const memory &mem, state &s)
     {
-        // TODO: Add the ol' static assert
+        // TODO: Remove the ol' static assert
         const auto &address = mem.at(++s.pc);
         if(address > 0xFF)
         { 
@@ -116,6 +116,8 @@ namespace address
     template <typename Operation> 
     void zero_page_x(const Operation &op, const memory &mem, state &s)
     {
+        // TODO: Revisit this, the cast to uint8_t will make it so that the address
+        //       that we're operating on is between 0x0000 - 0x00FF.
         const auto address = static_cast<uint8_t>(mem.at(++s.pc) + s.reg_x);
         if(address > 0xFF)
         {
@@ -160,12 +162,13 @@ namespace address
     void absolute(const Operation &op, const memory &mem, state &s)
     {
         ++s.pc;
-        const uint8_t MSB = mem.at(s.pc); 
+        const uint8_t LSB = mem.at(s.pc); 
         
         ++s.pc;
-        const uint8_t LSB = mem.at(s.pc);  
-   
+        const uint8_t MSB = mem.at(s.pc);  
+
         const uint16_t address =  (static_cast<uint8_t>(MSB) << 8U) | LSB;        
+        
         op(s, mem.at(address));
         ++s.pc;
     }
@@ -173,21 +176,33 @@ namespace address
     // Absolute, X
     //    Uses the values stored in the next two opcodes, along with the values stored
     //    in the X-register to generate the new address.
-    void absolute_x();
+    /*
+    void absolute_x()
+    {
+    }
    
     // Absolute, Y
     //    See above.
-    void absolute_y();
+    void absolute_y()
+    {
+    }
    
     // Indirect
     //    The next two bytes immediately following the opcode are used to set the PC.
-    void indirect();
-   
+    void indirect()
+    {
+    }
+
     // Indexed Indirect
     //     
-    void indexed_indirect();
-    
-    void indirect_indexed();
+    void indexed_indirect()
+    {
+    }
+
+    void indirect_indexed()
+    {
+    }
+    */
 
 } // namespace address
 

@@ -21,13 +21,12 @@ std::ostream &operator<<(std::ostream &os, const state &s) {
 }
 
 std::ostream &operator<<(std::ostream &os, const flags &f) {
-  using indices = cpu::flags::indices;
-  os << "[ N: " << f.at(indices::NEGATIVE)
-     << " | O: " << f.at(indices::OVERFLOW)
-     << " | B: " << f.at(indices::BREAKPOINT)
-     << " | D: " << f.at(indices::DECIMAL)
-     << " | I: " << f.at(indices::INTERRUPT) << " | Z: " << f.at(indices::ZERO)
-     << " | C: " << f.at(indices::CARRY) << " ]";
+  os << "[ N: " << f.at(flags::NEGATIVE)
+     << " | O: " << f.at(flags::OVERFLOW)
+     << " | B: " << f.at(flags::BREAKPOINT)
+     << " | D: " << f.at(flags::DECIMAL)
+     << " | I: " << f.at(flags::INTERRUPT) << " | Z: " << f.at(flags::ZERO)
+     << " | C: " << f.at(flags::CARRY) << " ]";
 
   return os;
 }
