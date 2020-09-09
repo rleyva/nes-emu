@@ -5,17 +5,17 @@
 namespace cpu {
 
 std::ostream &operator<<(std::ostream &os, const state &s) {
-  os << "PC:    " << std::hex << "0x" << s.pc << " (" << std::dec << s.pc
+    // TODO: Use std::showbase
+    os << "PC:    " << std::hex << "0x" << s.pc << " (" << std::dec << s.pc
      << ")\n"
-     << "SP:    " << std::hex << "0x" << s.sp << " (" << std::dec << s.sp
-     << ")\n"
+     << "SP:    " << std::hex << "0x" << s.sp << " (" << std::dec << s.sp << ")\n"
      << "A-reg: " << std::hex << "0x" << static_cast<uint16_t>(s.reg_a) << " ("
      << std::dec << static_cast<uint16_t>(s.reg_a) << ")\n"
      << "X-reg: " << std::hex << "0x" << static_cast<uint16_t>(s.reg_x) << " ("
      << std::dec << static_cast<uint16_t>(s.reg_x) << ")\n"
      << "Y-reg: " << std::hex << "0x" << static_cast<uint16_t>(s.reg_y) << " ("
      << std::dec << static_cast<uint16_t>(s.reg_y) << ")\n"
-     << "Flags: " << s.f;
+     << "Flags: " << s.status;
 
   return os;
 }

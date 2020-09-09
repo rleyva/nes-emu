@@ -1,9 +1,9 @@
-#include "utils.hh"
+#include "helpers.hh"
 
 #include <array>
-#include <functional>
+#include <bits/stdint-uintn.h>
 #include <stdint.h>
-#include <iostream>
+#include <string_view>
 #include <type_traits>
 
 #pragma once
@@ -15,6 +15,10 @@
 namespace cpu
 {
 
+// Naive memory implementation
+using memory = std::array<uint8_t, 0xFFFF>;
+
+// CPU status flags
 class flags
 {
 public:
@@ -28,26 +32,25 @@ public:
     static constexpr size_t NEGATIVE   = 7U;
 
     void reset() { std::fill(std::begin(flags_), std::end(flags_), false); }
-    bool &at(const size_t i) { return flags_.at(i); } 
-    const bool &at(const size_t i) const { return flags_.at(i); }
+    bool &at(const size_t i) { return flags_.at(i); }
+    const bool &at(const size_t i) const { return flags_.at(i); }; 
 
 private:
-    std::array<bool, 8U> flags_{false}; 
+    std::array<bool, 8U> flags_{false};
 };
- 
+
+// CPU state
 struct state
 {
     uint16_t pc = 0x0000;   // Program-counter.
     uint16_t sp = 0x0000;   // Stack-pointer.
-    flags    f;             // Processor flags.
+    flags    status;        // Processor flags.
 
     // Registers
     uint8_t reg_a = 0x00;   // Accumulator
     uint8_t reg_x = 0x00;   // X-index
-    uint8_t reg_y = 0x00;   // Y-index  
+    uint8_t reg_y = 0x00;   // Y-index
 };
-
-using memory = std::array<uint8_t, 0xFFFF>;
 
 namespace address
 {
@@ -61,159 +64,178 @@ namespace address
     //     - Zero-Page (along w/ its variants)
     //     - Relative
     //     - Absolute
-    //     - Indirect 
+    //     - Indirect
     //
-    // These functions wrap around an `Operation`, and provide a mechanism for fetching 
+    // These functions wrap around an `Operation`, and provide a mechanism for fetching
     // the required data for said operation, providing it to the operation, and updating
-    // any CPU state before returning. This decouples the operations from the addressing. 
+    // any CPU state before returning. This decouples the operations from the addressing.
     //
 
     // Implicit Addressing
     //    This addressing mode encompasses functions which do not need to take in
     //    values from memory, namely operations like CLC (Clear Carry Flag), RTS, etc.
-    template <typename Operation>
-    void implicit(const Operation &op, state &s)
+    const auto implicit = [](const auto &op, const memory &_, state &s)
     {
-        // TODO: Might just be best to remove this
-        utils::assert_contains_call_operator<Operation>();
+         // TODO: Might just be best to remove this
+        //helpers::assert_contains_call_operator<Operation>();
 
-        const uint8_t immediate_value = 20;
-        op(s, immediate_value);
-        ++s.pc;        
-    }
+        op(s);
+        ++s.pc;       
+    };
 
     // Immediate Addressing
-    //    Byte immediately after the opcode is used.  
-    template <typename Operation>
-    void immediate(const Operation &op, const memory &mem, state &s)
-    {   
+    //    Byte immediately after the opcode is used.
+    const auto immediate = [](const auto &op, const memory &mem, state &s)
+    {
+        op(s, mem.at(++s.pc));
         ++s.pc;
-        op(s, mem.at(s.pc));
-        ++s.pc;
-    }
-    
+    };
+
+    // Zero Page - This should be a single function like the following:
+
     // Zero Page
     //    Uses byte immediately after instruction. This limits it to fetching
     //    from $0000 - $00FF.
-    template <typename Operation>
-    void zero_page(const Operation &op, const memory &mem, state &s)
+    const auto zero_page = [](const auto &op, const memory &mem, state &s)
     {
         // TODO: Remove the ol' static assert
-        const auto &address = mem.at(++s.pc);
-        if(address > 0xFF)
-        { 
-            throw std::runtime_error("Fetched page address greater than 0xFF");
-        }
-         
+        const uint8_t address = mem.at(++s.pc);
         op(s, mem.at(address));
         ++s.pc;
-    }
-    
+    };
+
     // Zero Page, X
     //    Uses 8-bit address opperand immediately after instruction, along with the
     //    value currently stored the X register to generate the address that we will
     //    fetch our value from.
-    template <typename Operation> 
-    void zero_page_x(const Operation &op, const memory &mem, state &s)
+    const auto zero_page_x = [](const auto &op, const memory &mem, state &s)
     {
-        // TODO: Revisit this, the cast to uint8_t will make it so that the address
-        //       that we're operating on is between 0x0000 - 0x00FF.
-        const auto address = static_cast<uint8_t>(mem.at(++s.pc) + s.reg_x);
-        if(address > 0xFF)
-        {
-            throw std::runtime_error("Fetched page address greater than 0xFF");
-        }
-    
+        const auto address = helpers::sum_with_wrap_around(mem.at(++s.pc), s.reg_x, 0xFF);
         op(s, mem.at(address));
         ++s.pc;
-    }
+    };
 
     // Zero Page, Y
     //    Same as zero_page_x.
-    template <typename Operation> 
-    void zero_page_y(const Operation &op, const memory &mem, state &s)
+    const auto zero_page_y = [](const auto &op, const memory &mem, state &s)
     {
-        const auto address = static_cast<uint8_t>(mem.at(++s.pc) + s.reg_y);
-        if(address > 0xFF)
-        {
-            throw std::runtime_error("Fetched page address greater than 0xFF");
-        }
-    
+        const auto address = helpers::sum_with_wrap_around(mem.at(++s.pc), s.reg_y, 0xFF);
         op(s, mem.at(address));
         ++s.pc;
-    }
-    
+    };
+
     // Relative
     //    Used for branching operations - will use the the byte immediately after the
     //    opcode as the branch offset. The new branch will be the current PC + offset.
-    template <typename Operation>
-    void relative(const Operation &op, const memory &mem, state &s)
+    const auto relative = [](const auto &op, const memory &mem, state &s)
     {
-        // TODO: How are negative values stored?
-        const int8_t relative_offset = mem.at(++s.pc); 
-        s.pc += relative_offset;
-    }
-    
+        // This will operate on a signed range; 127 bytes forward, and 128 bytes backwards. 
+        // Values in memory are two's complement signed, but when we carry out the operations
+        // here we need to convert this over to a signed integer value.
+        
+        // NOTE: What happens if one were to set the PC to something less than $0?
+        //       Does the CPU expect a wraparound? (I think all programs are supposed to start
+        //       past 0xFF, so this won't be a problem)
+        // NOTE: Op will handle setting the PC based on the CPU flags. 
+        const auto relative_offset = helpers::convert_from_twos_complement(mem.at(++s.pc));
+        op(s, relative_offset);
+    };
+
     // Absolute
     //    Specifies memory location using the two bytes immediately following the opcode
-    //    to generate the new address. The 6502 is little-endian therefore the LSB will 
+    //    to generate the new address. The 6502 is little-endian therefore the LSB will
     //    be the first value loaded, followed by the MSB.
-    template <typename Operation>
-    void absolute(const Operation &op, const memory &mem, state &s)
+    //    NOTE: What happens when we load 0xFFFF?
+    
+    // Used to generate absolute addresses (doi....) 
+    const auto generate_absolute_address = [](const uint8_t register_value,
+                                              const memory &mem,
+                                              state &       s)
     {
-        ++s.pc;
-        const uint8_t LSB = mem.at(s.pc); 
-        
-        ++s.pc;
-        const uint8_t MSB = mem.at(s.pc);  
+       const uint8_t LSB      = mem.at(++s.pc);
+       const uint8_t MSB      = mem.at(++s.pc);
+       const uint16_t address = helpers::create_two_byte_address(MSB, LSB) + register_value;
 
-        const uint16_t address =  (static_cast<uint8_t>(MSB) << 8U) | LSB;        
-        
+       return address;
+    };
+
+    const auto absolute = [](const auto &op, const memory &mem, state &s)
+    {
+        const uint16_t address = generate_absolute_address(0U, mem, s);
         op(s, mem.at(address));
         ++s.pc;
-    }
-    
+    };
+
     // Absolute, X
     //    Uses the values stored in the next two opcodes, along with the values stored
     //    in the X-register to generate the new address.
-    /*
-    void absolute_x()
+    const auto absolute_x = [](const auto &op, const memory &mem, state &s)
     {
-    }
-   
+        const uint8_t address = generate_absolute_address(s.reg_x, mem, s);
+        op(s, mem.at(address));
+        ++s.pc;
+    };
+
     // Absolute, Y
     //    See above.
-    void absolute_y()
+    const auto absolute_y = [](const auto &op, const memory &mem, state &s)
     {
-    }
-   
+        const uint8_t address = generate_absolute_address(s.reg_y, mem, s);
+        op(s, mem.at(address));
+        ++s.pc;
+    };
+
     // Indirect
     //    The next two bytes immediately following the opcode are used to set the PC.
-    void indirect()
+    //    NOTE: This addressing mode should only be used in conjunction with the JMP instr.
+    const auto indirect = [](const auto &op, const memory &mem, state &s)
     {
-    }
+        const uint8_t LSB = mem.at(++s.pc);
+        const uint8_t MSB = mem.at(++s.pc);
+        
+        s.pc = helpers::create_two_byte_address(MSB, LSB);
+    };
 
     // Indexed Indirect
-    //     
-    void indexed_indirect()
+    //
+    const auto indexed_indirect = [](const auto &op, const memory &mem, state &s)
     {
-    }
+        // NOTE: See https://stackoverflow.com/questions/46262435/indirect-y-indexed-addressing-mode-in-mos-6502
+        //       to clear any confusion.
+        const auto page_address = helpers::sum_with_wrap_around(mem.at(++s.pc), s.reg_x, 0xFF);
+        const auto LSB          = mem.at(page_address);
+        const auto MSB          = mem.at(page_address + 1U);
 
-    void indirect_indexed()
+        s.pc = helpers::create_two_byte_address(MSB, LSB); 
+    };
+
+    // Indirect indexed
+    //
+    const auto indirect_indexed = [](const auto &op, const memory &mem, state &s)
     {
-    }
-    */
+        // NOTE: See https://stackoverflow.com/questions/46262435/indirect-y-indexed-addressing-mode-in-mos-6502
+        //       to clear any confusion.
+        const uint8_t LSB = helpers::sum_with_wrap_around(mem.at(++s.pc), s.reg_y, 0xFF);
+        const uint8_t MSB = mem.at(++s.pc); 
+
+        s.pc = helpers::create_two_byte_address(MSB, LSB); 
+    };
 
 } // namespace address
 
 namespace op
 {
-    enum class codes : uint8_t {
+    // How should this be structured? It seems that we can make these a pair of op-code
+    // to number of cycles since this is the only place in the arch where we are fully aware
+    // of what it is that we are running with.
+    //
+    enum class codes : uint8_t
+    {
         //
         // ADC instructions (Add with carry)
         //
         ADC_IMMEDIATE   = 0x69,
-        ADC_ZERO_PAGE   = 0x65, 
+        ADC_ZERO_PAGE   = 0x65,
         ADC_ZERO_PAGE_X = 0x75,
         ADC_ABSOLUTE    = 0x6D,
         ADC_ABSOLUTE_X  = 0x7D,
@@ -331,7 +353,7 @@ namespace op
         INC_ABSOLUTE_X  = 0xFE,
 
         //
-        // JMP () 
+        // JMP ()
         //
         JMP_ABSOLUTE = 0x4C,
         JMP_INDIRECT = 0x6C,
@@ -352,7 +374,7 @@ namespace op
         LDA_ABSOLUTE_Y  = 0xB9,
         LDA_INDIRECT_X  = 0xA1,
         LDA_INDIRECT_Y  = 0xB1,
-    
+
         //
         // LDX (Load X-register)
         //
@@ -482,81 +504,140 @@ namespace op
         //
         STY_ZERO_PAGE   = 0x84,
         STY_ZERO_PAGE_X = 0x94,
-        STY_ABSOLUTE    = 0x8C 
-        };
+        STY_ABSOLUTE    = 0x8C
+    };
 
-    // Carry functions.
-    inline void clear_carry(flags &flags) { flags.at(flags::CARRY) = false; }
-    inline void set_cary(flags &flags) { flags.at(flags::CARRY) = true; }
-
-    // Interrupt functions.
-    inline void clear_interrupt(flags &flags) { flags.at(flags::INTERRUPT) = false; }
-    inline void set_interrupt(flags &flags) { flags.at(flags::INTERRUPT) = true; } 
-
-    // Overflow functions.
-    inline void clear_overflow(flags &flags) { flags.at(flags::OVERFLOW) = false; }
-   
-    // Decimal functions.
-    inline void clear_decimal(flags &flags) { flags.at(flags::DECIMAL) = false; }  
-    inline void set_decimal(flags &flags) { flags.at(flags::DECIMAL) = true; }
+    // Overflow flag computation.
+    constexpr bool compute_overflow_flag(const uint8_t a, const uint8_t b)
+    {
+        // Reference: http://www.6502.org/tutorials/vflag.html
+        return (65280 + a) - b < 65152 || (65280 + a) - b > 65407;
+    }
 
     //
-    // Operations 
+    // Operations
     //
 
     // ADC
-    const auto adc_func = [](state &state, const uint8_t m)
+    auto adc_op = [](state &state, const uint8_t value)
     {
-        // TODO: Revist this uint16_t nonsense.
-        auto &carry_flag         = state.f.at(flags::CARRY);
-        const uint16_t result    = state.reg_a + m + (carry_flag ? 1U : 0U);
-        const bool     carry_set = result > 255U; 
-  
+        // NOTE: What happens if there's overflow w/ the carry addition?
+        const auto carry_value     = state.status.at(flags::CARRY) ? 1U : 0U;
+        const auto [result, carry] = helpers::sum_with_carry(state.reg_a, value + carry_value);
+
         // Set CPU flags.
-        state.f.reset();
-        state.f.at(flags::CARRY)    = carry_set;  
-        state.f.at(flags::ZERO)     = (result == 0);
-        state.f.at(flags::OVERFLOW) = true; // TODO: Revisit
-        state.f.at(flags::NEGATIVE) = (result & (1 << 7U));
-    
+        state.status.reset();
+        state.status.at(flags::CARRY)    = carry;
+        state.status.at(flags::ZERO)     = (result == 0);
+        state.status.at(flags::OVERFLOW) = op::compute_overflow_flag(state.reg_a, value + carry_value);
+        state.status.at(flags::NEGATIVE) = (result & (1 << 7U));
+
         // Set value in accumulator.
-        state.reg_a = static_cast<uint8_t>(result);    
-    };
-
-    // AND 
-    const auto and_func = [](state &state, const uint8_t m) 
-    {
-        const uint8_t result = state.reg_a & m;
-
-        state.f.reset();
-        state.f.at(flags::ZERO)     = (result == 0);
-        state.f.at(flags::NEGATIVE) = (result & (1 << 7U));       
-        
-        // Save value in accumulator. 
         state.reg_a = result;
     };
 
-    // ASL
-    const auto asl = [](state &state)
+    // AND
+    const auto and_op = [](state &state, const uint8_t value)
     {
-        // Is there a way where we can ensure we never attempt to call this with
-        // an unsupported addressing mode? 
-        const bool    carry_result = (state.reg_a >= 128U);
-        const uint8_t result       = (1U << state.reg_a);
-        
-        // Set flags.
-        state.f.reset();
-        state.f.at(flags::CARRY)    = carry_result;
-        state.f.at(flags::ZERO)     = (result == 0);
-        state.f.at(flags::NEGATIVE) = (result & (1 << 7U));
+        const uint8_t result = state.reg_a & value;
+
+        state.status.reset();
+        state.status.at(flags::ZERO)     = (result == 0);
+        state.status.at(flags::NEGATIVE) = (result & (1 << 7U));
 
         // Save value in accumulator.
         state.reg_a = result;
     };
 
-    // 
+    // ASL
+    const auto asl_op = [](state &state)
+    {
+        // Is there a way where we can ensure we never attempt to call this with
+        // an unsupported addressing mode?
+        const bool    carry_result = (state.reg_a >= 128U);
+        const uint8_t result       = (1U << state.reg_a);
 
-} // namspace op
+        // Set flags.
+        state.status.reset();
+        state.status.at(flags::CARRY)    = carry_result;
+        state.status.at(flags::ZERO)     = (result == 0);
+        state.status.at(flags::NEGATIVE) = (result & (1 << 7U));
+
+        // Save value in accumulator.
+        state.reg_a = result;
+    };
+
+    // BCC (branch on carry clear)
+    const auto bcc_op = [](state &state, const int8_t relative_offset)
+    {
+        !state.status.at(flags::CARRY) ? state.pc += relative_offset : state.pc += 1U;
+        
+        // NOTE: Do these instructions require us to reset the status reg?
+    };
+
+    // BCS (branch on carry set)
+    const auto bcs_op = [](state &state, const int8_t relative_offset)
+    {
+        state.status.at(flags::CARRY) ? state.pc += relative_offset : state.pc += 1U;
+    };
+
+    // BEQ (branch on equal)
+    const auto beq_op = [](state &state, const int8_t relative_offset)
+    {
+        state.status.at(flags::ZERO) ? state.pc += relative_offset : state.pc += 1U;
+    };
+
+    // BCS (branch on carry set)
+    const auto bit_op = [](state &state, const uint8_t value)
+    {
+        const bool masking_result = state.reg_a & value;
+        
+        state.status.reset();
+        state.status.at(flags::NEGATIVE) = (masking_result & (1 << 7)); // Set to value of bit 7
+        state.status.at(flags::OVERFLOW) = (masking_result & (1 << 6)); // Set to value of bit 6
+        state.status.at(flags::ZERO)     = (masking_result == 0x00);
+    };
+
+} // namespace op
+
+// Struct containing everything needed to define a 6502 instruction. 
+template<typename AddressingFunc, typename OperationFunc>
+class instruction
+{
+public:
+    instruction(const std::string_view &name,
+                const uint8_t           num_clk_cycles,
+                const AddressingFunc    addressing_function,
+                const OperationFunc     operation_function)
+        : name(name),
+          num_clk_cycles(num_clk_cycles),
+          addr_func_(addressing_function),
+          op_func_(operation_function)
+    {
+    }
+
+    // Readable name for the instruction that this struct represents.
+    std::string_view name;
+    
+    // Number of cycles that the operation will take to complete.
+    uint8_t num_clk_cycles;
+
+    // 
+    void operator()(const memory &mem, state &s) const
+    {
+        // TODO: Handle num_clk_cycles here.
+        addr_func_(op_func_, mem, s);
+    }
+
+    // TODO: Add << operator
+
+private:
+    // TODO: Add some template bits that will ensure we don't mix up an addressing
+    //       function and an operation function.
+    AddressingFunc addr_func_;
+    
+    OperationFunc op_func_;
+};
 
 // Debug ostream operators.
 std::ostream& operator << (std::ostream &os, const state &s);
